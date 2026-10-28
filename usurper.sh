@@ -25,7 +25,7 @@ require_root() {
 }
 
 valid_name() {
-    [[ "$1" =~ $NAME_RE ]] || die "invalid lab name: '$1'"
+    [[ "$1" =~ $NAME_RE ]] || die "[!!] Invalid lab name: '$1'"
 }
 
 registered_labs() {
@@ -50,3 +50,100 @@ lab_script() {
     [[ -f "$real" ]] || die "missing $phase script for '$lab' ($path)"
     printf '%s\n' "$real"
 }
+
+## -- commands --
+
+cmd_list() {
+    local active; active="$(active_lab)"
+    local any=0 lab
+    while IFS= read -r lab; do
+        any=1
+        if [[ "$lab" == "$active" ]]; then
+            printf '  * %s (active)\n' "$lab"
+        else
+            printf '    %s\n' "$lab"
+        fi
+    done < <(registered_labs)
+    [[ $any -eq 1 ]] || info "[!!] No labs available"
+}
+
+cmd_check() {
+    local active; active="$(active_lab)"
+    [[ -n "$active" ]] && info "$active" || info "[!!] No active lab"
+}
+
+cmd_install() {
+    local lab="${1:-}"; [[ -n "$lab" ]] || die "usage: usurper install <lab>"
+    valid_name "$lab"
+    lab_is_registered "$lab" || die "unknown lab: '$lab' (try: usurper list)"
+
+    local active; active="$(active_lab)"
+    if [[ -n "$active" ]]; then
+        [[ "$active" == "$lab" ]] \
+            && die "'$lab' is already active" \
+            || die "'$active' is active; remove it first (usurper remove $active)"
+    fi
+
+    local script; script="$(lab_script "$lab" install)"
+    info "installing '$lab'..."
+    if bash "$script"; then
+        printf '%s\n' "$lab" > "$STATE_FILE"   # mark active ONLY on success
+        info "'$lab' is now active"
+    else
+        die "install script failed — '$lab' NOT marked active"
+    fi
+}
+
+cmd_remove() {
+    local lab="${1:-}"; [[ -n "$lab" ]] || die "usage: usurper remove <lab>"
+    valid_name "$lab"
+
+    local active; active="$(active_lab)"
+    [[ -n "$active" ]] || die "no active lab to remove"
+    [[ "$active" == "$lab" ]] || die "'$lab' is not active ('$active' is)"
+
+    local script; script="$(lab_script "$lab" remove)"
+    info "removing '$lab'..."
+    if bash "$script"; then
+        rm -f "$STATE_FILE"
+        info "'$lab' removed"
+    else
+        die "remove script failed — '$lab' left active; fix and retry"
+    fi
+}
+
+
+
+# --- entrypoint -----------------------------------------------------------
+main() {
+    require_root
+    mkdir -p "$STATE_DIR"; chmod 0755 "$STATE_DIR"
+
+    local cmd="${1:-}"; shift || true
+    case "$cmd" in
+        install|remove)
+            # serialize state-changing ops against a second sudo invocation
+            exec 9>"$LOCK_FILE"
+            flock -n 9 || die "another usurper instance is running"
+            "cmd_$cmd" "$@"
+            ;;
+        list)  cmd_list  "$@" ;;
+        check) cmd_check "$@" ;;
+        ''|-h|--help|help)
+            cat <<'EOF'
+            usurper : lab lifecycle manager
+
+            usurper list              list available labs (active one marked *)
+            usurper install <lab>     install and activate a lab
+            usurper check             show the active lab
+            usurper remove <lab>      tear down and deactivate the active lab
+
+            Only one lab may be active at a time. Run with sudo.
+EOF
+            ;;
+        *) die "unknown command: '$cmd' (try: usurper help)" ;;
+    esac
+}
+
+
+main "$@"
