@@ -1,2 +1,3 @@
-# usurper
-One lab at a time
+# Usurper
+
+Usurper is a lab lifecycle manager managing one lab at a time.
