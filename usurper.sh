@@ -15,3 +15,38 @@ LOCK_FILE="$STATE_DIR/lock"
 
 NAME_RE='^[a-z0-9][a-z0-9_-]*$'  # lab name whitelist
 
+# -- helper functions --
+
+die() { printf 'usurper: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*"; }
+
+require_root() {
+    [[ ${EUID:-$(id -u)} -eq 0 ]] || die "must be run as root (use sudo)"
+}
+
+valid_name() {
+    [[ "$1" =~ $NAME_RE ]] || die "invalid lab name: '$1'"
+}
+
+registered_labs() {
+    [[ -f "$REGISTRY" ]] || die "no lab registry at $REGISTRY"
+    grep -vE '^[[:space:]]*(#|$)' "$REGISTRY" || true
+}
+
+lab_is_registered() {
+    grep -qxF "$1" <(registered_labs)
+}
+
+active_lab() {
+    [[ -s "$STATE_FILE" ]] && cat "$STATE_FILE" || true
+}
+
+# resolve + confine a lab's phase script inside LABS_DIR
+lab_script() {
+    local lab="$1" phase="$2"
+    local path="$LABS_DIR/$lab/$phase.sh"
+    local real; real="$(readlink -f "$path" 2>/dev/null || true)"
+    [[ -n "$real" && "$real" == "$LABS_DIR/"* ]] || die "path escapes labs dir: $path"
+    [[ -f "$real" ]] || die "missing $phase script for '$lab' ($path)"
+    printf '%s\n' "$real"
+}
