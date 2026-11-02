@@ -44,10 +44,17 @@ active_lab() {
 # resolve + confine a lab's phase script inside LABS_DIR
 lab_script() {
     local lab="$1" phase="$2"
-    local path="$LABS_DIR/$lab/$phase.sh"
+
+    local ext
+    case "$phase" in
+        details) ext="txt" ;;
+        *)       ext="sh"  ;;
+    esac 
+
+    local path="$LABS_DIR/$lab/$phase.$ext"
     local real; real="$(readlink -f "$path" 2>/dev/null || true)"
     [[ -n "$real" && "$real" == "$LABS_DIR/"* ]] || die "path escapes labs dir: $path"
-    [[ -f "$real" ]] || die "missing $phase script for '$lab' ($path)"
+    [[ -f "$real" ]] || die "missing $phase file for '$lab' ($path)"
     printf '%s\n' "$real"
 }
 
@@ -112,9 +119,17 @@ cmd_remove() {
     fi
 }
 
+cmd_details(){
+    local lab="${1:-}"; [[ -n "$lab" ]] || die "usage: usurper details <lab>"
+    valid_name "$lab"
+
+    local file; file="$(lab_script "$lab" details)"
+    cat -- "$file" || die "failed to read details for '$lab'"
+}
 
 
-# --- entrypoint -----------------------------------------------------------
+
+# --- entrypoint 
 main() {
     require_root
     mkdir -p "$STATE_DIR"; chmod 0755 "$STATE_DIR"
@@ -129,13 +144,15 @@ main() {
             ;;
         list)  cmd_list  "$@" ;;
         check) cmd_check "$@" ;;
+        details) cmd_details "$@" ;;
         ''|-h|--help|help)
             cat <<'EOF'
             usurper : lab lifecycle manager
 
             usurper list              list available labs (active one marked *)
-            usurper install <lab>     install and activate a lab
             usurper check             show the active lab
+            usurper install <lab>     install and activate a lab
+            usurper details <lab>     list details about the lab
             usurper remove <lab>      tear down and deactivate the active lab
 
             Only one lab may be active at a time. Run with sudo.
